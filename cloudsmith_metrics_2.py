@@ -1,6 +1,6 @@
 import cloudsmith_api
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
 import os
@@ -17,21 +17,21 @@ def get_layer_pulls(api_token, repository, months):
     api_instance = cloudsmith_api.EntitlementsApi(client)
 
     # Calculate the start date for the query
-    end_date = datetime.utcnow()
+    end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=months * 30)
 
     try:
         # Fetch entitlement keys
-        entitlements = api_instance.entitlements_list(namespace=repository.split('/')[0],
-                                                       repository=repository.split('/')[1])
+        entitlements = api_instance.entitlements_list(owner=repository.split('/')[0],
+                                                       repo=repository.split('/')[1])
 
         # Dictionary to store pulls grouped by key and month
         pulls_data = defaultdict(lambda: defaultdict(int))
 
         for entitlement in entitlements:
             key = entitlement.token
-            usage = api_instance.entitlements_usage_list(namespace=repository.split('/')[0],
-                                                          repository=repository.split('/')[1],
+            usage = api_instance.entitlements_usage_list(owner=repository.split('/')[0],
+                                                          repo=repository.split('/')[1],
                                                           identifier=key)
 
             for usage_record in usage:
@@ -42,13 +42,13 @@ def get_layer_pulls(api_token, repository, months):
 
         return pulls_data
 
-    except cloudsmith_api.exceptions.ApiException as e:
+    except Exception as e:
         print(f"An error occurred: {e}")
         return {}
 
 def write_csv(pulls_data, months, output_file):
     # Generate month columns
-    end_date = datetime.utcnow()
+    end_date = datetime.now(timezone.utc)
     months_list = [(end_date - timedelta(days=i * 30)).strftime('%Y-%m') for i in range(months)][::-1]
 
     # Write data to CSV
