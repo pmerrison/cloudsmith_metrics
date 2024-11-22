@@ -75,7 +75,7 @@ def get_layer_pulls(namespace, repo, months):
     logging.debug(f"Found {len(entitlements)} entitlement keys.")
 
     for entitlement in entitlements:
-        token = entitlement["slug"]
+        token = entitlement["token"]
         logging.info(f"Processing entitlement token: {token}")
 
         # Fetch usage metrics for each entitlement token
