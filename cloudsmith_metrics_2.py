@@ -8,7 +8,7 @@ import os
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Change to logging.INFO or logging.ERROR for less verbosity
+    level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
@@ -27,30 +27,29 @@ def fetch_entitlement_keys(namespace, repo):
 
     logging.debug(f"Fetching entitlement keys from: {url}")
     response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        logging.debug(f"Entitlement keys fetched successfully.")
-    else:
-        logging.error(f"Failed to fetch entitlement keys: {response.status_code} {response.text}")
     response.raise_for_status()
     return response.json()
 
-def fetch_usage_metrics(namespace, repo, entitlement_token):
+def fetch_usage_metrics(namespace, repo, token, start, finish):
     """
-    Fetch usage metrics for a specific entitlement key.
+    Fetch usage metrics for a specific entitlement token.
     """
-    url = f"{BASE_URL}/entitlements/{namespace}/{repo}/{entitlement_token}/metrics/"
+    url = f"{BASE_URL}/metrics/entitlements/{namespace}/{repo}/"
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
+    params = {
+        "tokens": token,
+        "start": start,
+        "finish": finish
+    }
 
-    logging.debug(f"Fetching usage metrics for entitlement token: {entitlement_token}")
-    response = requests.get(url, headers=headers)
+    logging.debug(f"Fetching usage metrics from: {url} with params: {params}")
+    response = requests.get(url, headers=headers, params=params)
     if response.status_code == 404:
-        logging.warning(f"No usage metrics found for entitlement token: {entitlement_token}")
+        logging.warning(f"No usage metrics found for entitlement token: {token}")
         return []
-    elif response.status_code != 200:
-        logging.error(f"Failed to fetch usage metrics: {response.status_code} {response.text}")
     response.raise_for_status()
     metrics = response.json()
-    logging.debug(f"Usage metrics fetched for {entitlement_token}: {metrics}")
+    logging.debug(f"Usage metrics fetched for {token}: {metrics}")
     return metrics
 
 def get_layer_pulls(namespace, repo, months):
@@ -60,6 +59,10 @@ def get_layer_pulls(namespace, repo, months):
     pulls_data = defaultdict(lambda: defaultdict(int))
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=months * 30)
+
+    # Format start and end dates as ISO strings
+    start_str = start_date.strftime("%Y-%m-%d")
+    finish_str = end_date.strftime("%Y-%m-%d")
 
     # Fetch all entitlement keys
     logging.info(f"Fetching entitlement keys for repository: {namespace}/{repo}")
@@ -72,11 +75,11 @@ def get_layer_pulls(namespace, repo, months):
     logging.debug(f"Found {len(entitlements)} entitlement keys.")
 
     for entitlement in entitlements:
-        token = entitlement["token"]
+        token = entitlement["slug"]
         logging.info(f"Processing entitlement token: {token}")
 
-        # Fetch usage metrics for each entitlement key
-        usage_metrics = fetch_usage_metrics(namespace, repo, token)
+        # Fetch usage metrics for each entitlement token
+        usage_metrics = fetch_usage_metrics(namespace, repo, token, start_str, finish_str)
 
         for metric in usage_metrics:
             pull_date = datetime.fromisoformat(metric["date"][:-1])  # Remove 'Z' for ISO parsing
@@ -111,8 +114,8 @@ if __name__ == "__main__":
         logging.error("API_TOKEN not found in .env file.")
         exit(1)
 
-    REPOSITORY = "tetrate/tid-fips-containers"  # Replace with "namespace/repository"
-    MONTHS = 6  # Number of months to analyze
+    REPOSITORY = "tetrate/tid-fips-containers"  # Replace with your namespace/repository
+    MONTHS = 24  # Number of months to analyze
     OUTPUT_FILE = "entitlement_pulls.csv"
 
     # Extract namespace and repo
