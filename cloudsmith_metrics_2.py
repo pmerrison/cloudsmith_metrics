@@ -1,4 +1,4 @@
-import cloudsmith_api
+import requests
 import csv
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
@@ -8,54 +8,68 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
-REPOSITORY = os.getenv("CLOUDSMITH_REPO")
 
-def get_layer_pulls(api_token, repository, months):
-    # Configure the Cloudsmith API client
-    configuration = cloudsmith_api.Configuration()
-    configuration.api_key['X-Api-Key'] = api_token
-    client = cloudsmith_api.ApiClient(configuration)
-    api_instance = cloudsmith_api.EntitlementsApi(client)
+BASE_URL = "https://api.cloudsmith.io/v1"
 
-    # Calculate the start date for the query
+def fetch_entitlement_keys(namespace, repo):
+    """
+    Fetch entitlement keys for the given repository.
+    """
+    url = f"{BASE_URL}/entitlements/{namespace}/{repo}/"
+    headers = {"Authorization": f"Bearer {API_TOKEN}"}
+
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()  # Raise exception for HTTP errors
+    return response.json()
+
+def fetch_usage_metrics(namespace, repo, entitlement_token):
+    """
+    Fetch usage metrics for a specific entitlement key.
+    """
+    url = f"{BASE_URL}/entitlements/{namespace}/{repo}/{entitlement_token}/metrics/"
+    headers = {"Authorization": f"Bearer {API_TOKEN}"}
+
+    response = requests.get(url, headers=headers)
+    if response.status_code == 404:  # Some entitlements may not have usage metrics
+        return []
+    response.raise_for_status()  # Raise exception for other HTTP errors
+    return response.json()
+
+def get_layer_pulls(namespace, repo, months):
+    """
+    Fetch entitlement keys and count layer pulls per month.
+    """
+    pulls_data = defaultdict(lambda: defaultdict(int))
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=months * 30)
 
-    try:
-        # Fetch entitlement keys
-        entitlements = api_instance.entitlements_list(owner=repository.split('/')[0],
-                                                       repo=repository.split('/')[1])
+    # Fetch all entitlement keys
+    entitlements = fetch_entitlement_keys(namespace, repo)
 
-        # Dictionary to store pulls grouped by key and month
-        pulls_data = defaultdict(lambda: defaultdict(int))
+    for entitlement in entitlements:
+        token = entitlement["token"]
 
-        for entitlement in entitlements:
-            key = entitlement.token
-            usage = api_instance.entitlements_usage_list(owner=repository.split('/')[0],
-                                                          repo=repository.split('/')[1],
-                                                          identifier=key)
+        # Fetch usage metrics for each entitlement key
+        usage_metrics = fetch_usage_metrics(namespace, repo, token)
 
-            for usage_record in usage:
-                pull_date = datetime.strptime(usage_record.date_created, '%Y-%m-%dT%H:%M:%S.%fZ')
-                if start_date <= pull_date <= end_date:
-                    month_key = pull_date.strftime('%Y-%m')
-                    pulls_data[key][month_key] += usage_record.docker_pull_count
+        for metric in usage_metrics:
+            pull_date = datetime.fromisoformat(metric["date"][:-1])  # Remove 'Z' for ISO parsing
+            if start_date <= pull_date <= end_date:
+                month_key = pull_date.strftime("%Y-%m")
+                pulls_data[token][month_key] += metric["count"]
 
-        return pulls_data
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return {}
+    return pulls_data
 
 def write_csv(pulls_data, months, output_file):
-    # Generate month columns
+    """
+    Write layer pull data to a CSV file.
+    """
     end_date = datetime.now(timezone.utc)
-    months_list = [(end_date - timedelta(days=i * 30)).strftime('%Y-%m') for i in range(months)][::-1]
+    months_list = [(end_date - timedelta(days=i * 30)).strftime("%Y-%m") for i in range(months)][::-1]
 
-    # Write data to CSV
-    with open(output_file, 'w', newline='') as csvfile:
+    with open(output_file, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Entitlement Key'] + months_list)
+        writer.writerow(["Entitlement Key"] + months_list)
 
         for key, month_data in pulls_data.items():
             row = [key] + [month_data.get(month, 0) for month in months_list]
@@ -67,14 +81,19 @@ if __name__ == "__main__":
         print("Error: API_TOKEN not found in .env file.")
         exit(1)
 
-    if not REPOSITORY:
-        print("Error, CLOUDSMITH_REPO not in env file")
-    
+    REPOSITORY = "tetrate/tid-fips-containers"  # Replace with "namespace/repository"
     MONTHS = 6  # Number of months to analyze
     OUTPUT_FILE = "entitlement_pulls.csv"
 
-    # Process data
-    pulls_data = get_layer_pulls(API_TOKEN, REPOSITORY, MONTHS)
-    write_csv(pulls_data, MONTHS, OUTPUT_FILE)
+    # Extract namespace and repo
+    namespace, repo = REPOSITORY.split("/")
 
-    print(f"Data written to {OUTPUT_FILE}")
+    # Fetch data and write to CSV
+    try:
+        pulls_data = get_layer_pulls(namespace, repo, MONTHS)
+        write_csv(pulls_data, MONTHS, OUTPUT_FILE)
+        print(f"Data written to {OUTPUT_FILE}")
+    except requests.HTTPError as e:
+        print(f"HTTP Error: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
