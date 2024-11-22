@@ -8,6 +8,7 @@ import os
 # Load environment variables from .env file
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
+REPOSITORY = os.getenv("CLOUDSMITH_REPO")
 
 def get_layer_pulls(api_token, repository, months):
     # Configure the Cloudsmith API client
@@ -66,7 +67,9 @@ if __name__ == "__main__":
         print("Error: API_TOKEN not found in .env file.")
         exit(1)
 
-    REPOSITORY = "your_namespace/your_repository"  # Replace with "namespace/repository"
+    if not REPOSITORY:
+        print("Error, CLOUDSMITH_REPO not in env file")
+    
     MONTHS = 6  # Number of months to analyze
     OUTPUT_FILE = "entitlement_pulls.csv"
 
