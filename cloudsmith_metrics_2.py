@@ -75,11 +75,14 @@ def get_layer_pulls(namespace, repo, months):
     logging.debug(f"Found {len(entitlements)} entitlement keys.")
 
     for entitlement in entitlements:
-        token = entitlement["token"]
+        token = entitlement["slug_perm"]
         logging.info(f"Processing entitlement token: {token}")
 
         # Fetch usage metrics for each entitlement token
         usage_metrics = fetch_usage_metrics(namespace, repo, token, start_str, finish_str)
+
+        downloads = usage_metrics["downloads"]
+        total_num_downloads = downloads["total"]
 
         for metric in usage_metrics:
             pull_date = datetime.fromisoformat(metric["date"][:-1])  # Remove 'Z' for ISO parsing
@@ -127,5 +130,5 @@ if __name__ == "__main__":
         write_csv(pulls_data, MONTHS, OUTPUT_FILE)
     except requests.HTTPError as e:
         logging.error(f"HTTP Error: {e}")
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+    #except Exception as e:
+    #    logging.error(f"An error occurred: {e}")
