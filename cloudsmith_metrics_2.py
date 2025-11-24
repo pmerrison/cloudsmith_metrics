@@ -1,6 +1,7 @@
 import requests
 import csv
 import logging
+import argparse
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
@@ -112,7 +113,8 @@ def get_layer_pulls(namespace, repo, months):
 
             # Fetch usage metrics for this token and month
             total_downloads = fetch_usage_metrics(namespace, repo, token, start_str, finish_str)
-            pulls_data[token][month_key] = total_downloads
+            # Use token name as the key instead of token slug
+            pulls_data[token_name][month_key] = total_downloads
 
             logging.debug(f"    Downloads: {total_downloads}")
 
@@ -138,35 +140,68 @@ def write_csv(pulls_data, months, output_file):
     logging.info(f"Writing data to CSV file: {output_file}")
     with open(output_file, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["Entitlement Token"] + months_list)
+        writer.writerow(["Entitlement Name"] + months_list)
 
-        for token, month_data in pulls_data.items():
-            row = [token] + [month_data.get(month, 0) for month in months_list]
+        for token_name, month_data in pulls_data.items():
+            row = [token_name] + [month_data.get(month, 0) for month in months_list]
             writer.writerow(row)
 
     logging.info(f"CSV file written successfully: {output_file}")
 
 if __name__ == "__main__":
-    # User inputs
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Generate CSV of total downloads per entitlement token per month for a Cloudsmith repository.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s tetrate/tid-fips-containers
+  %(prog)s tetrate/tid-fips-containers --months 12
+  %(prog)s tetrate/tid-fips-containers --months 6 --output my_metrics.csv
+        """
+    )
+    parser.add_argument(
+        "repository",
+        help="Cloudsmith repository in format: namespace/repo (e.g., tetrate/tid-fips-containers)"
+    )
+    parser.add_argument(
+        "--months",
+        type=int,
+        default=6,
+        help="Number of months to analyze (default: 6)"
+    )
+    parser.add_argument(
+        "--output",
+        default="entitlement_downloads.csv",
+        help="Output CSV file path (default: entitlement_downloads.csv)"
+    )
+
+    args = parser.parse_args()
+
+    # Check for API token
     if not API_TOKEN:
         logging.error("API_TOKEN not found in .env file.")
         exit(1)
 
-    # Configuration
-    REPOSITORY = "tetrate/tid-fips-containers"  # Replace with your namespace/repository
-    MONTHS = 6  # Number of months to analyze
-    OUTPUT_FILE = "entitlement_downloads.csv"
+    # Validate repository format
+    if "/" not in args.repository:
+        logging.error("Repository must be in format: namespace/repo (e.g., tetrate/tid-fips-containers)")
+        exit(1)
 
     # Extract namespace and repo
-    namespace, repo = REPOSITORY.split("/")
+    try:
+        namespace, repo = args.repository.split("/")
+    except ValueError:
+        logging.error("Invalid repository format. Expected: namespace/repo")
+        exit(1)
 
     # Fetch data and write to CSV
     try:
-        logging.info(f"Starting metrics collection for {REPOSITORY}")
-        logging.info(f"Analyzing {MONTHS} months of data")
-        pulls_data = get_layer_pulls(namespace, repo, MONTHS)
-        write_csv(pulls_data, MONTHS, OUTPUT_FILE)
-        logging.info(f"Successfully generated {OUTPUT_FILE}")
+        logging.info(f"Starting metrics collection for {args.repository}")
+        logging.info(f"Analyzing {args.months} months of data")
+        pulls_data = get_layer_pulls(namespace, repo, args.months)
+        write_csv(pulls_data, args.months, args.output)
+        logging.info(f"Successfully generated {args.output}")
     except requests.HTTPError as e:
         logging.error(f"HTTP Error: {e}")
         exit(1)
